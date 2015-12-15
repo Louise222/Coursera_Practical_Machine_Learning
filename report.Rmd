@@ -1,0 +1,80 @@
+---
+title: "Practical Machine Learning Project"
+author: "Yingjie Cao"
+date: "2015/12/15"
+output: html_document
+---
+
+#Getting and Cleaning Data
+```{r}
+# first download two files to Home which can be visited directly
+# link1:https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+# link2:https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+trainRaw<-read.csv("pml-training.csv",header = T)
+testRaw<-read.csv("pml-testing.csv",header = T)
+dim(trainRaw); dim(testRaw)
+sum(complete.cases(trainRaw))
+# remove columns which contain NA
+trainRaw<-trainRaw[,colSums(is.na(trainRaw))==0]
+testRaw<-testRaw[,colSums(is.na(testRaw))==0]
+dim(trainRaw); dim(testRaw)
+# use data from accelerometers on the belt, forearm, arm, and dumbell
+trainFind<-grepl("belt|forearm|arm|dumbell|classe", names(trainRaw))
+trainCleaned<-trainRaw[,trainFind]
+testFind<-grepl("belt|forearm|arm|dumbell", names(testRaw))
+testCleaned<-testRaw[,testFind]
+dim(trainCleaned); dim(testCleaned)
+# Oh no! There is still a problem, let's remove the columns which testCleaned do not have
+# the correct case is trainCleaned has one columns more than testCleaned, that is, classe
+trainCleaned<-trainCleaned[,-c(5:13,36:41,45:53)]
+dim(trainCleaned); dim(testCleaned)
+```
+
+
+#Build Model
+##Slice the data
+Since our model needs to use cross validation, we should slice the cleaned training data for two part: training subset and testing subset (this is a little confusing, let's just leave out the cleaned testing data, it is only for measurement), the proportions for them are assumed to be 0.7 and 0.3, respectively.
+```{r}
+library(caret)
+set.seed(1234)  # For reproducibile purpose
+inTrain<-createDataPartition(trainCleaned$classe,p=0.7,list = F)
+training<-trainCleaned[inTrain,]
+testing<-trainCleaned[-inTrain,]
+```
+
+##Fit with randomForests
+Random forests can be used to rank the importance of variables in a regression or classification problem in a natural way, and it has great accuracy. Since there are 39 variables in our Human Activity Recognition problem, it's hard to find out which one is important. Random forests seems like a great algorithm for this problem. Besides, we will use 5-fold cross validation (10-fold costs too much time!) to repeat fitting the model and average the estimated errors.
+```{r}
+library(randomForest)
+ctl<-trainControl(method = "cv",number = 5) #5-fold CV
+modFit<-train(classe~.,data=training,method="rf",trControl=ctl)
+modFit
+pred<-predict(modFit,newdata=testing)
+confusionMatrix(pred,testing$classe)
+# expected out of sample error (err=1-accuracy)
+# personally, I think this error is In Sample error, 
+# can we assume the expected out of sample error equals to in sample error?
+err<-1-as.numeric(confusionMatrix(pred,testing$classe)$overall[1])
+err
+```
+
+We get 99% of accuracy using this random forests algorithm, this is great enough since there might be some mistakes in raw data.
+
+##Comparing with Trees
+Finally, let's have a look at Decison Tree to get some idea of this data and all the variables.
+```{r}
+library(rpart)
+treeFit<-train(classe~.,data=training,method="rpart",trControl=ctl)
+treePred<-predict(treeFit,newdata=testing)
+confusionMatrix(treePred,testing$classe)
+print(treeFit$finalModel)
+```
+Predicting with Trees can only get 53.5% accuracy, which is far below Random forests.
+
+
+#Predict for Cleaned Test Data
+Now it's time for measurement, we use the cleaned test data to predict which classe each row belongs.
+```{r}
+result<-predict(modFit,newdata=testCleaned)
+result
+```
